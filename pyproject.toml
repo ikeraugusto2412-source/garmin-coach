@@ -1,0 +1,30 @@
+[project]
+name = "garmin-coach"
+version = "0.1.0"
+description = "Sincroniza Garmin Connect a SQLite y lo expone a Claude vía MCP como entrenador personal"
+requires-python = ">=3.12"
+dependencies = [
+    "garminconnect==0.3.17",
+    "mcp>=2.2,<3",
+    "python-dotenv>=1.0",
+    "cryptography>=43",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+garmin-coach = "garmin_coach.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["garmin_coach"]
+
+[tool.setuptools.package-data]
+garmin_coach = ["web_template.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
