@@ -27,8 +27,8 @@ def synced(conn, activities, monkeypatch):
     return conn
 
 
-def _envelope(html: str) -> dict:
-    return json.loads(html.split('<script id="payload" type="application/json">')[1].split("</script>")[0])
+def _envelope(site) -> dict:
+    return json.loads((site / "data.json").read_text())
 
 
 def test_payload_contents(synced):
@@ -54,21 +54,26 @@ def test_months_are_continuous():
 
 def test_site_is_encrypted_and_roundtrips(synced, tmp_path):
     out = web.build_site(tmp_path / "site", password=PW, conn=synced, today=TODAY)
+    for name in ("index.html", "data.json"):
+        text = (out / name).read_text()
+        assert "Act 1000" not in text and "SQUAT" not in text and "Media de prueba" not in text
     html = (out / "index.html").read_text()
-    assert "Act 1000" not in html and "SQUAT" not in html and "Media de prueba" not in html
-    env = _envelope(html)
+    assert "data.json?t=" in html  # datos pedidos sin caché
+    inline = json.loads(html.split('<script id="payload" type="application/json">')[1].split("</script>")[0])
+    assert inline == _envelope(out)  # copia de respaldo dentro de la página
+    env = _envelope(out)
     assert env["iter"] == 600_000 and env["kdf"] == "PBKDF2-SHA256"
     data = web.decrypt_payload(env, PW)
     assert data["race"]["name"] == "Media de prueba"
     with pytest.raises(Exception):
         web.decrypt_payload(env, "otra-contraseña")
-    for f in ("robots.txt", ".nojekyll", "manifest.webmanifest", "icon.svg"):
+    for f in ("robots.txt", ".nojekyll", "manifest.webmanifest", "icon.svg", "data.json"):
         assert (out / f).exists()
 
 
 def test_salt_is_stable_between_builds(synced, tmp_path):
-    a = _envelope(web.build_site(tmp_path / "a", password=PW, conn=synced, today=TODAY).joinpath("index.html").read_text())
-    b = _envelope(web.build_site(tmp_path / "b", password=PW, conn=synced, today=TODAY).joinpath("index.html").read_text())
+    a = _envelope(web.build_site(tmp_path / "a", password=PW, conn=synced, today=TODAY))
+    b = _envelope(web.build_site(tmp_path / "b", password=PW, conn=synced, today=TODAY))
     assert a["salt"] == b["salt"] and a["iv"] != b["iv"]
 
 
@@ -111,7 +116,7 @@ def test_publish_pushes_single_commit_to_gh_pages(synced, tmp_path):
     assert len(log) == 1
     files = subprocess.run(["git", "--git-dir", str(bare), "ls-tree", "--name-only", "gh-pages"],
                            capture_output=True, text=True, check=True).stdout.split()
-    assert {"index.html", ".nojekyll", "robots.txt"} <= set(files)
+    assert {"index.html", "data.json", ".nojekyll", "robots.txt"} <= set(files)
 
 
 def test_publish_without_remote_explains(tmp_path, monkeypatch):
@@ -125,6 +130,11 @@ def test_publish_without_remote_explains(tmp_path, monkeypatch):
 def test_schedule_plist_runs_daily_command():
     from garmin_coach import schedule
 
-    d = schedule.plist_dict(7, 30)
+    times = schedule.parse_times("21:30, 7:30,9")
+    assert times == [(7, 30), (9, 0), (21, 30)]
+    d = schedule.plist_dict(times)
     assert d["ProgramArguments"][-2:] == ["garmin_coach", "daily"]
-    assert d["StartCalendarInterval"] == {"Hour": 7, "Minute": 30}
+    assert d["StartCalendarInterval"] == [{"Hour": 7, "Minute": 30}, {"Hour": 9, "Minute": 0},
+                                          {"Hour": 21, "Minute": 30}]
+    with pytest.raises(ValueError):
+        schedule.parse_times("25:00")

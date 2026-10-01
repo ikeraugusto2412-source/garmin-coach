@@ -166,17 +166,20 @@ La web queda en `https://TU_USUARIO.github.io/garmin-coach/`. En el móvil, ábr
 "Recordar en este dispositivo". Añádela a la pantalla de inicio (Safari: Compartir → Añadir a pantalla de inicio)
 para abrirla como una app.
 
-### Actualización automática cada mañana
+### Actualización automática varias veces al día
 
 ```bash
-.venv/bin/python -m garmin_coach schedule install --hora 8:00   # instalar (launchd, en tu Mac)
-.venv/bin/python -m garmin_coach schedule status                # ver estado y últimas ejecuciones
-.venv/bin/python -m garmin_coach schedule uninstall             # quitarla
+.venv/bin/python -m garmin_coach schedule install                       # 7:30, 9:30, 15:00 y 21:30 (por defecto)
+.venv/bin/python -m garmin_coach schedule install --hora 8:00,22:00     # o las horas que prefieras
+.venv/bin/python -m garmin_coach schedule status                        # ver estado y últimas ejecuciones
+.venv/bin/python -m garmin_coach schedule uninstall                     # quitarla
 ```
 
-Cada día a esa hora el Mac sincroniza con Garmin, regenera la web cifrada y la publica. Si el Mac está dormido,
-se ejecuta al despertar. El registro queda en `logs/daily.log`. Si Garmin pide MFA de nuevo (sesión caducada),
-el registro lo indica: ejecuta `python -m garmin_coach login` en una terminal.
+A cada hora programada el Mac sincroniza con Garmin, regenera la web cifrada y la publica (tarda unos 30 segundos).
+Se ejecuta varias veces porque el reloj no sube los datos al momento: el sueño llega a Garmin Connect cuando abres
+la app por la mañana, y los entrenos, al terminar. Si el Mac está dormido, se ejecuta al despertar. El registro queda
+en `logs/daily.log`. Si Garmin pide MFA de nuevo (sesión caducada), el registro lo indica: ejecuta
+`python -m garmin_coach login` en una terminal.
 
 Para actualizar a mano después de entrenar: `.venv/bin/python -m garmin_coach daily`.
 

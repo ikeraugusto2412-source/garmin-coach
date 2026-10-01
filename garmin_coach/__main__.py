@@ -59,7 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("daily", help="sincroniza + genera + publica (lo usa la tarea programada)")
     p_sch = sub.add_parser("schedule", help="gestiona la tarea diaria de macOS")
     p_sch.add_argument("action", choices=["install", "uninstall", "status"])
-    p_sch.add_argument("--hora", default="8:00", help="hora de ejecución, p. ej. 7:30 (por defecto 8:00)")
+    p_sch.add_argument("--hora", default=None,
+                       help="horas de ejecución separadas por comas, p. ej. 7:30,9:30,21:30 "
+                            "(por defecto 7:30,9:30,15:00,21:30)")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -112,8 +114,11 @@ def main(argv: list[str] | None = None) -> int:
         from . import schedule
 
         if args.action == "install":
-            h, _, m = args.hora.partition(":")
-            print(schedule.install(int(h), int(m or 0)))
+            try:
+                print(schedule.install(args.hora or schedule.DEFAULT_TIMES))
+            except ValueError as e:
+                print(f"✗ {e}", file=sys.stderr)
+                return 1
         elif args.action == "uninstall":
             print(schedule.uninstall())
         else:

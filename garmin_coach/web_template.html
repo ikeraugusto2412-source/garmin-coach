@@ -120,6 +120,11 @@ header.top .date { font-size: .82rem; color: var(--ink-3); margin-top: 2px; }
 .sync-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 999px;
   background: var(--surface); border: 1px solid var(--rule); font-size: .78rem; color: var(--ink-2); white-space: nowrap; }
 .sync-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+button.sync-pill { appearance: none; cursor: pointer; font-family: inherit; }
+@media (prefers-reduced-motion: no-preference) {
+  .sync-pill.busy i { animation: pulse .9s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; transform: scale(.7); } }
+}
 .sync-pill.stale i { background: var(--warning); }
 section.view { display: grid; gap: 30px; grid-template-columns: minmax(0, 1fr); }
 section.view > *, .block, .chart-block, .sub > * { min-width: 0; }
@@ -365,7 +370,7 @@ footer.foot { margin-top: 40px; font-size: .8rem; color: var(--ink-3); display: 
   </nav>
   <header class="top" id="top">
     <div><h1 id="title">Hoy</h1><div class="date" id="today-date"></div></div>
-    <div class="sync-pill" id="sync-info"><i></i><span></span></div>
+    <button class="sync-pill" id="sync-info" type="button" title="Comprobar si hay datos nuevos"><i></i><span></span></button>
   </header>
   <section class="view" id="v-hoy"></section>
   <section class="view" id="v-plan" hidden></section>
@@ -378,13 +383,30 @@ footer.foot { margin-top: 40px; font-size: .8rem; color: var(--ink-3); display: 
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script>
 "use strict";
-const ENV = JSON.parse(document.getElementById("payload").textContent);
 const KEY_STORE = "garmin-coach-key";
+const ENV_STORE = "garmin-coach-env";
+let ENV = null;   // sobre cifrado (data.json)
+let RAW = null;   // clave en memoria, para refrescar sin volver a pedir la contraseña
 let D = null;
 
-/* ================= descifrado ================= */
+/* ================= datos cifrados ================= */
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const b64e = u => btoa(String.fromCharCode(...u));
+
+// GitHub Pages cachea 10 minutos: se piden los datos con un parámetro único para saltarse la caché.
+async function fetchEnv() {
+  const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const env = await r.json();
+  try { localStorage.setItem(ENV_STORE, JSON.stringify(env)); } catch {}
+  return env;
+}
+function cachedEnv() { try { return JSON.parse(localStorage.getItem(ENV_STORE) || "null"); } catch { return null; } }
+// Copia de respaldo incluida en la propia página (por si data.json no está o no hay red).
+function inlineEnv() {
+  try { const e = JSON.parse(document.getElementById("payload").textContent); return e && e.ct ? e : null; } catch { return null; }
+}
+const isNetworkError = err => !String(err && err.message).startsWith("HTTP");
 
 async function deriveRaw(pw) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"]);
@@ -392,9 +414,9 @@ async function deriveRaw(pw) {
     { name: "PBKDF2", hash: "SHA-256", salt: b64d(ENV.salt), iterations: ENV.iter }, base, 256);
   return new Uint8Array(bits);
 }
-async function decryptWith(raw) {
+async function decryptWith(raw, env = ENV) {
   const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(ENV.iv) }, key, b64d(ENV.ct));
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(env.iv) }, key, b64d(env.ct));
   const stream = new Blob([pt]).stream().pipeThrough(new DecompressionStream("gzip"));
   return JSON.parse(await new Response(stream).text());
 }
@@ -404,7 +426,7 @@ function storeSet(v) { try { v ? localStorage.setItem(KEY_STORE, JSON.stringify(
 async function tryRemembered() {
   const s = storeGet();
   if (!s || s.salt !== ENV.salt) return false;
-  try { D = await decryptWith(b64d(s.k)); return true; } catch { storeSet(null); return false; }
+  try { const raw = b64d(s.k); D = await decryptWith(raw); RAW = raw; return true; } catch { storeSet(null); return false; }
 }
 
 document.getElementById("lock-form").addEventListener("submit", async e => {
@@ -412,12 +434,15 @@ document.getElementById("lock-form").addEventListener("submit", async e => {
   const btn = document.getElementById("open-btn"), msg = document.getElementById("lock-msg");
   msg.hidden = true; btn.disabled = true; btn.textContent = "Descifrando…";
   try {
+    if (!ENV) { ENV = await fetchEnv().catch(() => inlineEnv() || cachedEnv()); if (!ENV) throw new Error("sin-datos"); }
     const raw = await deriveRaw(document.getElementById("pw").value);
     D = await decryptWith(raw);
+    RAW = raw;
     if (document.getElementById("remember").checked) storeSet({ salt: ENV.salt, k: b64e(raw) });
     start();
   } catch (err) {
-    msg.textContent = window.isSecureContext ? "Contraseña incorrecta. Vuelve a intentarlo."
+    msg.textContent = err.message === "sin-datos" ? "No se han podido cargar los datos. Comprueba la conexión y vuelve a intentarlo."
+      : window.isSecureContext ? "Contraseña incorrecta. Vuelve a intentarlo."
       : "Abre la web por https para poder descifrar los datos.";
     msg.hidden = false;
   } finally { btn.disabled = false; btn.textContent = "Ver mis datos"; }
@@ -1160,37 +1185,66 @@ const built = {};
 const BUILDERS = { hoy: viewHoy, plan: viewPlan, progreso: viewProgreso, actividades: viewActividades, salud: viewSalud };
 const WEEKDAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 const MONTHS_L = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
-function show(view) {
+let currentView = "hoy", offline = false, refreshing = false;
+function show(view, keepScroll) {
+  currentView = view;
   document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.view === view));
   document.querySelectorAll("section.view").forEach(s => s.hidden = s.id !== "v-" + view);
   document.getElementById("title").textContent = TITLES[view];
   if (!built[view]) { BUILDERS[view](); built[view] = true; }
   else charts.forEach(c => c.wrap.offsetParent && c.render());
   try { sessionStorage.setItem("gc-view", view); } catch {}
-  window.scrollTo(0, 0);
+  if (!keepScroll) window.scrollTo(0, 0);
+}
+function chrome() {
+  const t = new Date();
+  document.getElementById("today-date").textContent = `${WEEKDAYS[t.getDay()]}, ${t.getDate()} de ${MONTHS_L[t.getMonth()]}`;
+  const pill = document.getElementById("sync-info");
+  const hours = D.last_sync ? (Date.now() - new Date(D.last_sync)) / 36e5 : 99;
+  pill.classList.toggle("stale", hours > 30 || offline);
+  pill.classList.toggle("busy", refreshing);
+  pill.querySelector("span").textContent = refreshing ? "Actualizando…" : offline ? "Sin conexión"
+    : D.last_sync ? `Garmin ${when(D.last_sync)}, ${D.last_sync.slice(11, 16)}` : "Actualizar";
+  document.getElementById("foot").innerHTML = `<div>Web generada el ${fDayY(D.generated)} a las ${D.generated.slice(11, 16)} con tus datos de Garmin Connect y el plan de tu entrenador. Todo va cifrado en esta página. Toca el indicador de arriba para comprobar si hay datos nuevos.</div>
+    <div><button class="btn-ghost" id="forget">Olvidar la contraseña en este dispositivo</button></div>`;
+  document.getElementById("forget").addEventListener("click", () => { storeSet(null); location.reload(); });
+}
+// Vuelve a pedir los datos y repinta si han cambiado (al abrir, al volver a la app y al tocar el indicador).
+async function refresh() {
+  if (refreshing || !RAW) return;
+  refreshing = true; chrome();
+  let env = null;
+  try { env = await fetchEnv(); offline = false; } catch (err) { offline = isNetworkError(err); }
+  if (env && (env.iv !== ENV.iv || env.salt !== ENV.salt)) {
+    try {
+      const d = await decryptWith(RAW, env);
+      ENV = env; D = d;
+      for (const k in built) delete built[k];
+      charts.length = 0;
+      show(currentView, true);
+    } catch { storeSet(null); location.reload(); return; }  // cambió la contraseña: volver a pedirla
+  }
+  refreshing = false; chrome();
 }
 function start() {
   document.getElementById("lock").hidden = true;
   document.getElementById("app").hidden = false;
-  const t = new Date();
-  document.getElementById("today-date").textContent = `${WEEKDAYS[t.getDay()]}, ${t.getDate()} de ${MONTHS_L[t.getMonth()]}`;
-  const pill = document.getElementById("sync-info");
-  if (D.last_sync) {
-    const hours = (Date.now() - new Date(D.last_sync)) / 36e5;
-    pill.classList.toggle("stale", hours > 30);
-    pill.querySelector("span").textContent = `Garmin ${when(D.last_sync)}, ${D.last_sync.slice(11, 16)}`;
-  } else pill.hidden = true;
-  document.getElementById("foot").innerHTML = `<div>Web generada el ${fDayY(D.generated)} a las ${D.generated.slice(11, 16)} con tus datos de Garmin Connect y el plan de tu entrenador. Todo va cifrado en esta página.</div>
-    <div><button class="btn-ghost" id="forget">Olvidar la contraseña en este dispositivo</button></div>`;
-  document.getElementById("forget").addEventListener("click", () => { storeSet(null); location.reload(); });
+  chrome();
   document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+  document.getElementById("sync-info").addEventListener("click", refresh);
   const top = document.getElementById("top");
   window.addEventListener("scroll", () => top.classList.toggle("scrolled", window.scrollY > 4), { passive: true });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  window.addEventListener("pageshow", e => { if (e.persisted) refresh(); });
+  setInterval(() => { if (!document.hidden) refresh(); }, 5 * 60 * 1000);
   let first = "hoy";
   try { first = sessionStorage.getItem("gc-view") || "hoy"; } catch {}
   show(BUILDERS[first] ? first : "hoy");
 }
-(async () => { if (await tryRemembered()) start(); else document.getElementById("pw").focus(); })();
+(async () => {
+  try { ENV = await fetchEnv(); } catch (err) { ENV = inlineEnv() || cachedEnv(); offline = !!ENV && isNetworkError(err); }
+  if (ENV && await tryRemembered()) start(); else document.getElementById("pw").focus();
+})();
 </script>
 </body>
 </html>

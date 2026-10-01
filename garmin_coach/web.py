@@ -298,11 +298,14 @@ def build_site(out_dir: Path | None = None, password: str | None = None,
         if own:
             conn.close()
 
+    # El sobre cifrado va dos veces: dentro de la página (respaldo) y en data.json (lo que la página pide
+    # siempre fresco, saltándose la caché de 10 minutos de GitHub Pages).
     html = TEMPLATE.read_text(encoding="utf-8").replace("__PAYLOAD__", json.dumps(env))
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
     (out / "index.html").write_text(html, encoding="utf-8")
+    (out / "data.json").write_text(json.dumps(env), encoding="utf-8")
     (out / "icon.svg").write_text(ICON_SVG, encoding="utf-8")
     (out / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
     (out / ".nojekyll").write_text("", encoding="utf-8")

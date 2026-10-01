@@ -228,16 +228,17 @@ def delete_coach_note(nota_id: int) -> str:
 async def publish_web() -> str:
     """Regenera la web cifrada con los datos, el plan y las notas actuales y la publica en GitHub Pages.
     Tarda unos segundos; GitHub tarda 1-2 minutos más en mostrar la nueva versión."""
-    from .web import WebError, build_site, origin_url, publish_site
+    import subprocess
 
     def work() -> str:
-        try:
-            build_site()
-            if not origin_url():
-                return "Web generada en site/, pero el proyecto aún no está en GitHub, así que no se ha publicado."
-            return f"Web publicada: {publish_site()} (visible en 1-2 minutos)."
-        except WebError as e:
-            return f"No se pudo publicar: {e}"
+        # En un proceso aparte: así se usa siempre el código actual del disco, aunque este servidor lleve
+        # días abierto con una versión anterior en memoria.
+        r = subprocess.run([sys.executable, "-m", "garmin_coach", "web", "--publish"], cwd=PROJECT_ROOT,
+                           capture_output=True, text=True, timeout=180)
+        out = (r.stdout + r.stderr).strip()
+        if r.returncode != 0:
+            return f"No se pudo publicar: {out[-600:]}"
+        return out + "\nEl deportista la verá al abrir la web o al tocar el indicador de sincronización."
 
     return await anyio.to_thread.run_sync(work)
 
