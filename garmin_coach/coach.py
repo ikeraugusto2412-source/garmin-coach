@@ -7,7 +7,8 @@ from datetime import date, timedelta
 from typing import Any
 
 from . import db
-from .queries import BIKE_TYPES, RUN_TYPES, STRENGTH_TYPES, fmt_dur, fmt_pace, table
+from . import queries
+from .queries import RUN_TYPES, STRENGTH_TYPES, fmt_dur, fmt_pace, table
 
 SESSION_KINDS = {
     "suave": "Rodaje suave",
@@ -92,7 +93,7 @@ def save_note(conn: sqlite3.Connection, title: str, body: str, kind: str = "reco
         raise PlanError(f"Tipo de nota desconocido '{kind}'. Usa uno de: {', '.join(NOTE_KINDS)}")
     if not title.strip() or not body.strip():
         raise PlanError("La nota necesita título y contenido.")
-    d = _check_date(when, "fecha") if when else date.today().isoformat()
+    d = _check_date(when, "fecha") if when else queries._today().isoformat()
     cur = conn.execute(
         "INSERT INTO coach_notes(date, kind, title, body, pinned, created_at) VALUES (?,?,?,?,?,?)",
         (d, k, title.strip(), body.strip(), int(pinned), db.now_iso()),
@@ -130,7 +131,7 @@ def _matches(kind: str, activity_type: str | None) -> bool:
 def sessions_with_status(conn: sqlite3.Connection, start: date, end: date,
                          today: date | None = None) -> list[dict[str, Any]]:
     """Sesiones del plan con su estado: hecho | pendiente | no_hecho | descanso."""
-    today = today or date.today()
+    today = today or queries._today()
     acts: dict[str, list[sqlite3.Row]] = {}
     for a in conn.execute(
         "SELECT activity_id, date, type, name, distance_m, duration_s, pace_s_km, avg_hr, training_load "
@@ -180,7 +181,7 @@ def get_plan_text(conn: sqlite3.Connection, desde: date, hasta: date, today: dat
           (f"{r['done']['km']} km, {fmt_dur(r['done']['dur'])}, {fmt_pace(r['done']['pace'])}, FC {r['done']['hr']}"
            if r.get("done") else "-")) for r in rows],
     ))
-    planned = [r for r in rows if r["kind"] != "descanso" and date.fromisoformat(r["date"]) < (today or date.today())]
+    planned = [r for r in rows if r["kind"] != "descanso" and date.fromisoformat(r["date"]) < (today or queries._today())]
     if planned:
         done = sum(1 for r in planned if r["status"] == "hecho")
         lines.append(f"\nCumplimiento de sesiones pasadas: {done}/{len(planned)}")

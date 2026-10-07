@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -86,3 +87,21 @@ def _is_empty(data: Any) -> bool:
     if isinstance(data, (list, dict, str)) and len(data) == 0:
         return True
     return False
+
+
+def wait_for_network(hosts: tuple[str, ...] = ("connectapi.garmin.com", "github.com"), timeout: float = 600,
+                     interval: float = 10, sleep: Callable[[float], None] = time.sleep,
+                     resolve: Callable[..., Any] = socket.getaddrinfo) -> bool:
+    """Espera a que haya conexión (DNS de Garmin y GitHub). Al despertar, el Mac lanza la tarea
+    programada unos segundos antes de reconectar el Wi-Fi."""
+    waited = 0.0
+    while True:
+        try:
+            for h in hosts:
+                resolve(h, 443)
+            return True
+        except OSError:
+            if waited >= timeout:
+                return False
+            sleep(interval)
+            waited += interval

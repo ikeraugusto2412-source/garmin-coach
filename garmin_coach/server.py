@@ -201,7 +201,7 @@ def save_coach_note(titulo: str, contenido: str,
 def get_training_plan(desde: str | None = None, hasta: str | None = None) -> str:
     """Plan guardado frente a lo realizado: cada sesión con su estado (hecho / pendiente / no hecho) y la actividad
     real que la cumplió. Por defecto, la semana pasada, la actual y la siguiente. Incluye las notas del entrenador."""
-    today = date.today()
+    today = queries._today()
     monday = today - timedelta(days=today.weekday())
     d0 = queries._parse_date(desde, monday - timedelta(days=7))
     d1 = queries._parse_date(hasta, monday + timedelta(days=13))

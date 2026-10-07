@@ -829,7 +829,9 @@ function viewPlan() {
     }
     const mon = weeks[wi], sun = addDays(mon, 6);
     const ws = S.filter(s => s.date >= mon && s.date <= sun);
-    const plan = P.plans.find(p => ws.some(s => s.plan_id === p.plan_id));
+    // Si conviven dos planes en la semana (uno ajustado a mitad), manda el más reciente.
+    const plan = P.plans.filter(p => ws.some(s => s.plan_id === p.plan_id))
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0];
     const past = ws.filter(s => s.kind !== "descanso" && s.date < D.today);
     const doneN = past.filter(s => s.status === "hecho").length;
     const workN = ws.filter(s => s.kind !== "descanso").length;

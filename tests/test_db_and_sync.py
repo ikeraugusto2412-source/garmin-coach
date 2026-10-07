@@ -154,3 +154,26 @@ def test_rate_limit_waits_then_aborts_and_resume_works(conn, activities):
     g.get_body_battery = original
     Syncer(g, conn, caller=Caller(delay=0, sleep=lambda s: None), progress=quiet, today=TODAY).run()
     assert db.get_state(conn, "daily_synced_until") == "2026-09-30"
+
+
+def test_wait_for_network_retries_until_dns_works():
+    from garmin_coach.api import wait_for_network
+
+    calls = {"n": 0}
+    waits: list[float] = []
+
+    def resolve(host, port):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise OSError("nodename nor servname provided")
+        return [()]
+
+    assert wait_for_network(sleep=waits.append, resolve=resolve) is True
+    assert waits == [10, 10, 10]
+
+    def never(host, port):
+        raise OSError("sin red")
+
+    waits.clear()
+    assert wait_for_network(timeout=30, sleep=waits.append, resolve=never) is False
+    assert waits == [10, 10, 10]

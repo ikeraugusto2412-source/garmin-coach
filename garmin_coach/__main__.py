@@ -7,7 +7,7 @@ import logging
 import sys
 from datetime import datetime
 
-from .api import RateLimited
+from .api import RateLimited, wait_for_network
 from .auth import AuthError, get_client, tokenstore_path
 
 
@@ -19,6 +19,9 @@ def _daily() -> int:
     def log(msg: str) -> None:
         print(f"[{datetime.now():%Y-%m-%d %H:%M}] {msg}", flush=True)
 
+    if not wait_for_network():
+        log("Sin conexión a internet tras 10 minutos de espera; se reintentará en la próxima hora programada.")
+        return 4
     code = 0
     try:
         summary = run_sync(get_client(interactive=False), full=False, progress=lambda m: None)
