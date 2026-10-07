@@ -184,8 +184,9 @@ def _publish_soon() -> None:
         _publish_timer = threading.Timer(PUBLISH_DELAY_S, work)
         _publish_timer.start()
 
-WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
-DELETE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+# open_world_hint=True: además de escribir en la base local, publican la web (cifrada) en GitHub Pages.
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
+DELETE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
 
 SessionKind = Literal["suave", "calidad", "tirada_larga", "gimnasio", "cruzado", "descanso", "competicion"]
 
@@ -204,7 +205,7 @@ class Sesion(BaseModel):
 
 @mcp.tool(annotations=WRITE, structured_output=False)
 def save_training_plan(titulo: str, sesiones: list[Sesion], resumen: str = "", objetivo: str = "") -> str:
-    """Guarda un plan de entrenamiento (normalmente una semana) para que el deportista lo vea en su web.
+    """Guarda un plan de entrenamiento (normalmente una semana) y publica la web del deportista para que lo vea.
     Sustituye las sesiones que hubiera en esas mismas fechas. Incluye también los días de descanso.
     resumen: explicación del plan y del porqué (markdown sencillo). objetivo: foco de la semana."""
     with closing(db.connect()) as conn:
@@ -222,7 +223,7 @@ def save_training_plan(titulo: str, sesiones: list[Sesion], resumen: str = "", o
 def save_coach_note(titulo: str, contenido: str,
                     tipo: Literal["recomendacion", "analisis", "aviso", "objetivo"] = "recomendacion",
                     fijar: bool = False) -> str:
-    """Guarda una recomendación, análisis, aviso u objetivo del entrenador para mostrarlo en la web.
+    """Guarda una recomendación, análisis, aviso u objetivo del entrenador y publica la web para mostrarlo.
     contenido admite markdown sencillo. fijar=True la mantiene arriba (p. ej. pautas de ritmos o zonas)."""
     with closing(db.connect()) as conn:
         try:
@@ -247,7 +248,7 @@ def get_training_plan(desde: str | None = None, hasta: str | None = None) -> str
 
 @mcp.tool(annotations=DELETE, structured_output=False)
 def delete_training_plan(plan_id: int) -> str:
-    """Borra un plan y todas sus sesiones (el id aparece en get_training_plan)."""
+    """Borra un plan y todas sus sesiones (el id aparece en get_training_plan) y publica la web sin él."""
     with closing(db.connect()) as conn:
         if not coach.delete_plan(conn, plan_id):
             return f"No existe el plan {plan_id}."
@@ -257,7 +258,7 @@ def delete_training_plan(plan_id: int) -> str:
 
 @mcp.tool(annotations=DELETE, structured_output=False)
 def delete_coach_note(nota_id: int) -> str:
-    """Borra una nota del entrenador (el id aparece en get_training_plan)."""
+    """Borra una nota del entrenador (el id aparece en get_training_plan) y publica la web sin ella."""
     with closing(db.connect()) as conn:
         if not coach.delete_note(conn, nota_id):
             return f"No existe la nota {nota_id}."

@@ -159,6 +159,8 @@ def test_mcp_session_kind_schema_matches_backend():
     enum = tools["save_training_plan"].input_schema["$defs"]["Sesion"]["properties"]["tipo"]["enum"]
     assert set(enum) == set(coach.SESSION_KINDS)
     assert tools["delete_training_plan"].annotations.destructive_hint is True
+    for name in ("save_training_plan", "save_coach_note", "delete_training_plan", "delete_coach_note"):
+        assert tools[name].annotations.open_world_hint is True  # publican la web: no son solo locales
 
 
 def test_web_payload_includes_plan_and_notes(server_db):
