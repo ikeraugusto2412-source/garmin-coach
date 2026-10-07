@@ -120,6 +120,38 @@ def test_mcp_plan_tools_roundtrip(server_db):
     assert bad.startswith("No se guardó el plan")
 
 
+def test_coach_changes_publish_web_automatically(server_db, no_real_publish):
+    call("save_training_plan", {"titulo": "x", "sesiones": [{"fecha": "no", "tipo": "suave", "titulo": "a"}]})
+    assert no_real_publish == []  # un guardado fallido no publica
+    call("save_training_plan", {"titulo": "S", "sesiones": [{"fecha": d(1), "tipo": "suave", "titulo": "Rodaje"}]})
+    call("save_coach_note", {"titulo": "Zonas", "contenido": "Rodajes < 150 lpm"})
+    assert len(no_real_publish) == 2
+    assert "No existe" in call("delete_coach_note", {"nota_id": 999})
+    assert len(no_real_publish) == 2
+    assert "Nota borrada" in call("delete_coach_note", {"nota_id": 1})
+    assert len(no_real_publish) == 3
+
+
+def test_publish_soon_groups_consecutive_changes(monkeypatch):
+    import importlib
+    import time
+
+    from garmin_coach import server
+
+    real = importlib.reload(server)._publish_soon  # la versión sin parchear
+    runs: list[int] = []
+
+    class R:
+        returncode = 0
+        stdout = stderr = ""
+
+    monkeypatch.setattr(server, "_run_publish", lambda: runs.append(1) or R())
+    monkeypatch.setattr(server, "PUBLISH_DELAY_S", 0.05)
+    real(), real(), real()
+    time.sleep(0.4)
+    assert runs == [1]
+
+
 def test_mcp_session_kind_schema_matches_backend():
     from garmin_coach.server import mcp
 

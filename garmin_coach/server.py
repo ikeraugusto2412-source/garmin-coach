@@ -7,7 +7,9 @@ IMPORTANTE: nada debe escribir en stdout salvo el protocolo MCP.
 from __future__ import annotations
 
 import logging
+import subprocess
 import sys
+import threading
 from contextlib import closing
 from pathlib import Path
 
@@ -33,7 +35,8 @@ Actúas como su entrenador personal. Antes de dar cualquier consejo de entrenami
 2) revisa get_training_status, get_weekly_summary(8) y get_daily_health de las últimas 2 semanas.
 Si los datos parecen desactualizados, ofrece ejecutar sync_garmin. Responde en español.
 Cuando propongas un plan de entrenamiento, guárdalo con save_training_plan y las recomendaciones clave con
-save_coach_note, para que el deportista las vea en su web; después ofrece publish_web para actualizarla.
+save_coach_note: la web del deportista se publica sola unos segundos después de guardar (no hace falta preguntar
+ni llamar a publish_web).
 Antes de planificar una semana nueva, revisa get_training_plan para ver qué se cumplió del plan anterior."""
 
 mcp = MCPServer("garmin-coach", instructions=INSTRUCTIONS)
@@ -150,6 +153,37 @@ def query_sql(consulta: str) -> str:
 
 # ---------- plan y notas del entrenador (escritura) ----------
 
+PUBLISH_DELAY_S = 15
+AUTO_MSG = "La web se publica sola en unos segundos (GitHub tarda 1-2 min más en mostrarla)."
+_publish_timer: threading.Timer | None = None
+_publish_lock = threading.Lock()
+
+
+def _run_publish() -> subprocess.CompletedProcess:
+    # En un proceso aparte: así se usa siempre el código actual del disco, aunque este servidor lleve
+    # días abierto con una versión anterior en memoria.
+    return subprocess.run([sys.executable, "-m", "garmin_coach", "web", "--publish"], cwd=PROJECT_ROOT,
+                          capture_output=True, text=True, timeout=180)
+
+
+def _publish_soon() -> None:
+    """Publica la web tras cada cambio del entrenador. Si llegan varios seguidos (plan + notas), publica una vez."""
+    global _publish_timer
+
+    def work() -> None:
+        try:
+            r = _run_publish()
+            if r.returncode != 0:
+                logging.warning("Publicación automática fallida: %s", (r.stdout + r.stderr).strip()[-600:])
+        except Exception as e:  # noqa: BLE001 - la tarea programada lo reintentará
+            logging.warning("Publicación automática fallida: %s", e)
+
+    with _publish_lock:
+        if _publish_timer is not None:
+            _publish_timer.cancel()
+        _publish_timer = threading.Timer(PUBLISH_DELAY_S, work)
+        _publish_timer.start()
+
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
 DELETE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
 
@@ -178,9 +212,10 @@ def save_training_plan(titulo: str, sesiones: list[Sesion], resumen: str = "", o
             r = coach.save_plan(conn, titulo, [x.model_dump() for x in sesiones], resumen, objetivo)
         except coach.PlanError as e:
             return f"No se guardó el plan: {e}"
+    _publish_soon()
     extra = f" Sustituye {r['replaced']} sesiones anteriores en esas fechas." if r["replaced"] else ""
     return (f"Plan guardado (id {r['plan_id']}): {r['sessions']} sesiones del {r['start']} al {r['end']}.{extra} "
-            "Aparecerá en la web en la próxima publicación (publish_web o la actualización diaria).")
+            + AUTO_MSG)
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
@@ -194,7 +229,8 @@ def save_coach_note(titulo: str, contenido: str,
             nid = coach.save_note(conn, titulo, contenido, tipo, fijar)
         except coach.PlanError as e:
             return f"No se guardó la nota: {e}"
-    return f"Nota guardada (id {nid}). Aparecerá en la web en la próxima publicación."
+    _publish_soon()
+    return f"Nota guardada (id {nid}). {AUTO_MSG}"
 
 
 @mcp.tool(annotations=RO, structured_output=False)
@@ -213,28 +249,31 @@ def get_training_plan(desde: str | None = None, hasta: str | None = None) -> str
 def delete_training_plan(plan_id: int) -> str:
     """Borra un plan y todas sus sesiones (el id aparece en get_training_plan)."""
     with closing(db.connect()) as conn:
-        return "Plan borrado." if coach.delete_plan(conn, plan_id) else f"No existe el plan {plan_id}."
+        if not coach.delete_plan(conn, plan_id):
+            return f"No existe el plan {plan_id}."
+    _publish_soon()
+    return f"Plan borrado. {AUTO_MSG}"
 
 
 @mcp.tool(annotations=DELETE, structured_output=False)
 def delete_coach_note(nota_id: int) -> str:
     """Borra una nota del entrenador (el id aparece en get_training_plan)."""
     with closing(db.connect()) as conn:
-        return "Nota borrada." if coach.delete_note(conn, nota_id) else f"No existe la nota {nota_id}."
+        if not coach.delete_note(conn, nota_id):
+            return f"No existe la nota {nota_id}."
+    _publish_soon()
+    return f"Nota borrada. {AUTO_MSG}"
 
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
                                       open_world_hint=True), structured_output=False)
 async def publish_web() -> str:
-    """Regenera la web cifrada con los datos, el plan y las notas actuales y la publica en GitHub Pages.
+    """Regenera la web cifrada con los datos, el plan y las notas actuales y la publica en GitHub Pages ahora mismo.
+    No hace falta tras guardar o borrar planes y notas (se publica sola); úsala p. ej. después de sync_garmin.
     Tarda unos segundos; GitHub tarda 1-2 minutos más en mostrar la nueva versión."""
-    import subprocess
 
     def work() -> str:
-        # En un proceso aparte: así se usa siempre el código actual del disco, aunque este servidor lleve
-        # días abierto con una versión anterior en memoria.
-        r = subprocess.run([sys.executable, "-m", "garmin_coach", "web", "--publish"], cwd=PROJECT_ROOT,
-                           capture_output=True, text=True, timeout=180)
+        r = _run_publish()
         out = (r.stdout + r.stderr).strip()
         if r.returncode != 0:
             return f"No se pudo publicar: {out[-600:]}"

@@ -88,7 +88,8 @@ El deportista consulta su plan y tus recomendaciones en una web en el móvil. Po
   series x repeticiones). En `resumen` explica el porqué con números. Respeta la disponibilidad del perfil.
 - **Las recomendaciones importantes** (ritmos de referencia, un análisis, un aviso) guárdalas con `save_coach_note`.
   Fija (`fijar=True`) las que deban estar siempre a mano, como los ritmos por zona.
-- Después, pregunta si quiere verlo ya en el móvil y usa `publish_web` (si no, se actualiza cada mañana).
+- La web se publica sola unos segundos después de guardar o borrar (tarda 1-2 min en verse en el móvil): no hace
+  falta preguntar ni llamar a `publish_web`. Úsala solo tras `sync_garmin` si quiere ver ya los datos nuevos.
 - Para corregir un plan, vuelve a guardarlo: sustituye las sesiones de esas fechas.
 
 ## 7. Formato de la respuesta

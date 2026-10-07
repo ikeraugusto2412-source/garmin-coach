@@ -222,3 +222,13 @@ def activities():
                               z=(2000, 500, 0, 0, 0)))
     acts.append(fake_activity(aid + 1, TODAY - timedelta(days=9), typ="mountain_biking", km=35, load=80))
     return acts
+
+
+@pytest.fixture(autouse=True)
+def no_real_publish(monkeypatch):
+    """Ningún test publica la web real: se cuentan las publicaciones automáticas en vez de lanzarlas."""
+    from garmin_coach import server
+
+    calls: list[int] = []
+    monkeypatch.setattr(server, "_publish_soon", lambda: calls.append(1))
+    return calls
