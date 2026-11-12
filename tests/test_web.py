@@ -133,8 +133,33 @@ def test_schedule_plist_runs_daily_command():
     times = schedule.parse_times("21:30, 7:30,9")
     assert times == [(7, 30), (9, 0), (21, 30)]
     d = schedule.plist_dict(times)
-    assert d["ProgramArguments"][-2:] == ["garmin_coach", "daily"]
+    assert d["ProgramArguments"][-3:] == ["garmin_coach", "daily", "--log"]
+    assert d["StandardOutPath"] == "/dev/null"  # launchd no abre el registro: si no pudiera, no arrancaría
+    assert schedule.parse_times(schedule.DEFAULT_TIMES)[0] == (7, 0) and len(schedule.parse_times(schedule.DEFAULT_TIMES)) == 17
     assert d["StartCalendarInterval"] == [{"Hour": 7, "Minute": 30}, {"Hour": 9, "Minute": 0},
                                           {"Hour": 21, "Minute": 30}]
     with pytest.raises(ValueError):
         schedule.parse_times("25:00")
+
+
+def test_daily_log_falls_back_when_file_is_blocked(tmp_path, monkeypatch):
+    from garmin_coach import __main__ as cli, schedule
+
+    log = tmp_path / "logs" / "daily.log"
+    monkeypatch.setattr(schedule, "LOG", log)
+    log.parent.mkdir()
+    log.write_text("viejo\n")
+    real_open = type(log).open
+    blocked = [True]
+
+    def blocked_once(self, *a, **k):
+        if self == log and blocked:
+            blocked.clear()
+            raise PermissionError("macl")  # como el fichero que macOS bloqueó con com.apple.macl
+        return real_open(self, *a, **k)
+
+    monkeypatch.setattr(type(log), "open", blocked_once)
+    with cli._open_log() as f:
+        f.write("nuevo\n")
+    assert log.read_text() == "nuevo\n"
+    assert [p.read_text() for p in log.parent.glob("daily-hasta-*.log")] == ["viejo\n"]

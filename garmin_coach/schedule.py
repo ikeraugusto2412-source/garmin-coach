@@ -15,7 +15,8 @@ PLIST = Path("~/Library/LaunchAgents").expanduser() / f"{LABEL}.plist"
 LOG = PROJECT_ROOT / "logs" / "daily.log"
 
 
-DEFAULT_TIMES = "7:30,9:30,15:00,21:30"
+# Cada hora de 7:00 a 23:00: la web refleja el sueño y los entrenos poco después de sincronizar el reloj.
+DEFAULT_TIMES = ",".join(f"{h}:00" for h in range(7, 24))
 
 
 def parse_times(spec: str) -> list[tuple[int, int]]:
@@ -35,11 +36,13 @@ def parse_times(spec: str) -> list[tuple[int, int]]:
 def plist_dict(times: list[tuple[int, int]]) -> dict:
     return {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable, "-m", "garmin_coach", "daily"],
+        "ProgramArguments": [sys.executable, "-m", "garmin_coach", "daily", "--log"],
         "WorkingDirectory": str(PROJECT_ROOT),
         "StartCalendarInterval": [{"Hour": h, "Minute": m} for h, m in times],
-        "StandardOutPath": str(LOG),
-        "StandardErrorPath": str(LOG),
+        # El registro lo abre el propio programa (daily --log). Si launchd tuviera que abrirlo y macOS le negara
+        # el acceso al fichero (p. ej. por el atributo com.apple.macl), la tarea ni siquiera arrancaría.
+        "StandardOutPath": "/dev/null",
+        "StandardErrorPath": "/dev/null",
         "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
         "ProcessType": "Background",
     }
@@ -81,10 +84,14 @@ def status() -> str:
         cal = plistlib.load(f).get("StartCalendarInterval", [])
     cal = [cal] if isinstance(cal, dict) else cal
     times = [(c.get("Hour", 0), c.get("Minute", 0)) for c in cal]
-    loaded = _launchctl("print", f"gui/{os.getuid()}/{LABEL}").returncode == 0
+    info = _launchctl("print", f"gui/{os.getuid()}/{LABEL}")
+    loaded = info.returncode == 0
+    warn = ""
+    if "spawn failed" in info.stdout:
+        warn = "\n⚠ La última ejecución no pudo arrancar. Reinstálala con: python -m garmin_coach schedule install"
     last = ""
     if LOG.exists():
         lines = [ln for ln in LOG.read_text(encoding="utf-8", errors="replace").splitlines() if ln.startswith("[")]
         last = "\nÚltimas líneas del registro:\n" + "\n".join(lines[-6:]) if lines else ""
     return (f"Actualización automática {'activa' if loaded else 'instalada pero NO cargada'} a las "
-            f"{_fmt(times)}.{last}")
+            f"{_fmt(times)}.{warn}{last}")

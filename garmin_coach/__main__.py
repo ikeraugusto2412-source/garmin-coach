@@ -45,6 +45,26 @@ def _daily() -> int:
     return code
 
 
+def _open_log():
+    from .schedule import LOG
+
+    LOG.parent.mkdir(exist_ok=True)
+    try:
+        return LOG.open("a", encoding="utf-8")
+    except OSError:
+        # macOS puede bloquear un fichero concreto (atributos de privacidad): se aparta y se empieza otro.
+        LOG.rename(LOG.with_name(f"daily-hasta-{datetime.now():%Y-%m-%d-%H%M}.log"))
+        return LOG.open("a", encoding="utf-8")
+
+
+def _redirect_to_log() -> None:
+    try:
+        f = _open_log()
+    except OSError:
+        return  # sin registro, pero la sincronización y la publicación siguen
+    sys.stdout = sys.stderr = f
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="garmin_coach", description="Garmin Connect → SQLite → Claude")
     parser.add_argument("-v", "--verbose", action="store_true", help="log detallado")
@@ -59,14 +79,17 @@ def main(argv: list[str] | None = None) -> int:
     p_web = sub.add_parser("web", help="genera la web cifrada en site/")
     p_web.add_argument("--publish", action="store_true", help="y la publica en GitHub Pages (rama gh-pages)")
     sub.add_parser("web-password", help="define la contraseña de la web (se guarda en .env)")
-    sub.add_parser("daily", help="sincroniza + genera + publica (lo usa la tarea programada)")
+    p_daily = sub.add_parser("daily", help="sincroniza + genera + publica (lo usa la tarea programada)")
+    p_daily.add_argument("--log", action="store_true", help="escribe la salida en logs/daily.log")
     p_sch = sub.add_parser("schedule", help="gestiona la tarea diaria de macOS")
     p_sch.add_argument("action", choices=["install", "uninstall", "status"])
     p_sch.add_argument("--hora", default=None,
                        help="horas de ejecución separadas por comas, p. ej. 7:30,9:30,21:30 "
-                            "(por defecto 7:30,9:30,15:00,21:30)")
+                            "(por defecto cada hora de 7:00 a 23:00)")
 
     args = parser.parse_args(argv)
+    if args.cmd == "daily" and args.log:
+        _redirect_to_log()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
